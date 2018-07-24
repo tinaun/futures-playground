@@ -22,10 +22,9 @@ use std::mem::PinMut;
 use std::marker::Unpin;
 
 pub trait Compat01: Future01 {
-    fn compat(self) -> Compat<Self, ()> where Self: Sized {
-        Compat {
+    fn compat(self) -> CompatOne<Self> where Self: Sized {
+        CompatOne {
             inner: self,
-            exec: None,
         }
     }
 }
@@ -33,13 +32,13 @@ pub trait Compat01: Future01 {
 impl<T: Future01> Compat01 for T {}
 
 pub trait Compat03: Future03 {
-    fn compat<E>(self, exec: E) -> Compat<Self, E> 
+    fn compat<E>(self, exec: E) -> CompatThree<Self, E> 
         where Self: Sized,
               E: Executor03, 
     {
-        Compat {
+        CompatThree {
             inner: self,
-            exec: Some(exec),
+            exec: exec,
         }
     }
 }
@@ -47,7 +46,7 @@ pub trait Compat03: Future03 {
 impl<T: Future03> Compat03 for T {}
 
 pub trait ExecCompat: Executor01<
-        Compat<FutureObj<'static, ()>, BoxedExecutor>
+        CompatThree<FutureObj<'static, ()>, BoxedExecutor>
     > + Clone + Send + 'static
 {
     fn compat(self) -> ExecutorCompat<Self> 
@@ -56,7 +55,7 @@ pub trait ExecCompat: Executor01<
 
 impl<E> ExecCompat for E
 where E: Executor01<
-        Compat<FutureObj<'static, ()>, BoxedExecutor>
+        CompatThree<FutureObj<'static, ()>, BoxedExecutor>
       >,
       E: Clone + Send + 'static
 {
@@ -67,12 +66,16 @@ where E: Executor01<
     }
 }
 
-pub struct Compat<F, E> {
+pub struct CompatOne<F> {
     inner: F,
-    exec: Option<E>,
 }
 
-impl<T> Future03 for Compat<T, ()> where T: Future01 {
+pub struct CompatThree<F, E> {
+    inner: F,
+    exec: E,
+}
+
+impl<T> Future03 for CompatOne<T> where T: Future01 {
     type Output = Result<T::Item, T::Error>;
 
     fn poll(self: PinMut<Self>, cx: &mut task::Context) -> Poll03<Self::Output> {
@@ -126,7 +129,7 @@ unsafe impl UnsafeNotify for NotifyWaker {
 
 
 
-impl<T, E> Future01 for Compat<T, E> where T: Future03,
+impl<T, E> Future01 for CompatThree<T, E> where T: Future03,
     E: Executor03
 {
     type Item = T::Output;
@@ -136,7 +139,7 @@ impl<T, E> Future01 for Compat<T, E> where T: Future03,
         use futures::Async;
 
         let waker = current_as_waker();
-        let mut cx = task::Context::new(&waker, self.exec.as_mut().unwrap());
+        let mut cx = task::Context::new(&waker, &mut self.exec);
         unsafe {
         match PinMut::new_unchecked(&mut self.inner).poll(&mut cx) {
             Poll03::Ready(t) => Ok(Async::Ready(t)),
@@ -176,7 +179,7 @@ impl Executor03 for BoxedExecutor {
 
 impl<E> Executor03 for ExecutorCompat<E> 
     where E: Executor01<
-        Compat<FutureObj<'static, ()>, BoxedExecutor>
+        CompatThree<FutureObj<'static, ()>, BoxedExecutor>
     >,
     E: Clone + Send + 'static,
 {
