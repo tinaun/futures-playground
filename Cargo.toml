@@ -9,6 +9,7 @@ authors = ["tinaun <tinagma@gmail.com>"]
 
 [dependencies]
 futures-core-preview = "0.3.0-alpha.1"
+futures-util-preview = "0.3.0-alpha.1"
 futures = "0.1"
 
 [dev-dependencies]

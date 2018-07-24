@@ -1,6 +1,7 @@
 #![feature(futures_api, pin, arbitrary_self_types, use_extern_macros)]
 
 use futures::Future as Future01;
+use futures::future::Executor as Executor01;
 use futures::Poll as Poll01;
 use futures::task as task01;
 use futures::task::Task as Task01;
@@ -14,6 +15,8 @@ use futures_core::Poll as Poll03;
 use futures_core::task;
 use futures_core::task::Executor as Executor03;
 use futures_core::task::{Wake, Waker, LocalWaker, local_waker_from_nonlocal};
+
+use futures_util::future::FutureExt;
 
 use std::mem::PinMut;
 use std::marker::Unpin;
@@ -42,6 +45,27 @@ pub trait Compat03: Future03 {
 }
 
 impl<T: Future03> Compat03 for T {}
+
+pub trait ExecCompat: Executor01<
+        Compat<FutureObj<'static, ()>, BoxedExecutor>
+    > + Clone + Send + 'static
+{
+    fn compat(self) -> ExecutorCompat<Self> 
+        where Self: Sized;
+}
+
+impl<E> ExecCompat for E
+where E: Executor01<
+        Compat<FutureObj<'static, ()>, BoxedExecutor>
+      >,
+      E: Clone + Send + 'static
+{
+    fn compat(self) -> ExecutorCompat<Self> {
+        ExecutorCompat {
+            exec: self,
+        }
+    }
+}
 
 pub struct Compat<F, E> {
     inner: F,
@@ -102,7 +126,7 @@ unsafe impl UnsafeNotify for NotifyWaker {
 
 
 
-impl<T, E> Future01 for Compat<T, E> where T: Future03 + Unpin,
+impl<T, E> Future01 for Compat<T, E> where T: Future03,
     E: Executor03
 {
     type Item = T::Output;
@@ -113,10 +137,11 @@ impl<T, E> Future01 for Compat<T, E> where T: Future03 + Unpin,
 
         let waker = current_as_waker();
         let mut cx = task::Context::new(&waker, self.exec.as_mut().unwrap());
-        
-        match PinMut::new(&mut self.inner).poll(&mut cx) {
+        unsafe {
+        match PinMut::new_unchecked(&mut self.inner).poll(&mut cx) {
             Poll03::Ready(t) => Ok(Async::Ready(t)),
             Poll03::Pending  => Ok(Async::NotReady),
+        }
         }
     }
 }
@@ -134,4 +159,38 @@ impl Wake for Current {
     }
 }
 
+use futures_core::future::FutureObj;
 
+#[derive(Clone)]
+pub struct ExecutorCompat<E> {
+    exec: E
+}
+
+pub struct BoxedExecutor(Box<Executor03 + Send>);
+
+impl Executor03 for BoxedExecutor {
+    fn spawn_obj(&mut self, obj: FutureObj<'static, ()>) -> Result<(), task::SpawnObjError> {
+        (&mut *self.0).spawn_obj(obj)
+    }
+}
+
+impl<E> Executor03 for ExecutorCompat<E> 
+    where E: Executor01<
+        Compat<FutureObj<'static, ()>, BoxedExecutor>
+    >,
+    E: Clone + Send + 'static,
+{
+    fn spawn_obj(&mut self, obj: FutureObj<'static, ()>) -> Result<(), task::SpawnObjError> {
+        
+        self.exec.execute(obj.compat(BoxedExecutor(Box::new(self.clone()))))
+                 .map_err(|exec_err| {
+                     use crate::task::{SpawnObjError, SpawnErrorKind};
+                     
+                     let fut = exec_err.into_future().compat().map(|_| ());
+                     SpawnObjError {
+                         kind: SpawnErrorKind::shutdown(),
+                         task: Box::new(fut).into(),   
+                     }
+                 })
+    }
+}
