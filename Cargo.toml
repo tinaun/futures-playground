@@ -8,10 +8,5 @@ authors = ["tinaun <tinagma@gmail.com>"]
 
 
 [dependencies]
-futures-core-preview = "0.3.0-alpha.1"
-futures-util-preview = "0.3.0-alpha.1"
-futures = "0.1"
-
-[dev-dependencies]
-hyper = "0.12"
-tokio = "0.1"
+futures-preview = "0.3.0-alpha.2"
+nb = "0.1"
