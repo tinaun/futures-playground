@@ -9,4 +9,4 @@ authors = ["tinaun <tinagma@gmail.com>"]
 
 [dependencies]
 futures-preview = "0.3.0-alpha.2"
-nb = "0.1"
+nb = { version = "0.1", features = ["unstable"] }
