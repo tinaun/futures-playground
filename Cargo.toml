@@ -11,3 +11,4 @@ authors = ["tinaun <tinagma@gmail.com>"]
 futures-preview = { git = "https://github.com/rust-lang-nursery/futures-rs.git", features = ["compat"] }
 hyper = "0.12"
 tokio = "0.1"
+pin-utils = "0.1.0-alpha.1"
